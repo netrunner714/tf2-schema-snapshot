@@ -1,0 +1,21 @@
+{
+  "name": "tf2-schema-snapshot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Daily-build TF2 schema snapshot: merges items_game.txt structure with GetSchemaItems display facts (names, icons, qualities, i18n) into versioned JSON artifacts.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build:snapshot": "tsx src/run-snapshot.ts",
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.3"
+  }
+}

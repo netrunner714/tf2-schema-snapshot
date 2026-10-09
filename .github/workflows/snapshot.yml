@@ -1,0 +1,105 @@
+name: Daily schema snapshot
+
+on:
+  schedule:
+    # 04:10 UTC — off-peak for Steam and for GitHub Actions load.
+    - cron: "10 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: snapshot
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run tests
+        run: pnpm test
+
+      - name: Build snapshot
+        env:
+          STEAM_API_KEY: ${{ secrets.STEAM_API_KEY }}
+          SNAPSHOT_LANGUAGES: ru
+          SNAPSHOT_OUT_DIR: dist
+        run: pnpm build:snapshot
+
+      - name: Detect changes against the latest release
+        id: diff
+        run: |
+          set -euo pipefail
+          # Download the previous released snapshot and compare content hashes.
+          PREV_META_URL="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/snapshot-release/dist/meta.json"
+          PREV_HASH=$(curl -fsSL "$PREV_META_URL" 2>/dev/null | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{try{console.log(JSON.parse(d).contentHash)}catch{console.log('')}})" || echo "")
+          NEW_HASH=$(node -e "console.log(JSON.parse(require('fs').readFileSync('dist/meta.json','utf8')).contentHash)")
+          echo "prev-hash: ${PREV_HASH:-none}"
+          echo "new-hash: $NEW_HASH"
+          if [ -n "$PREV_HASH" ] && [ "$PREV_HASH" = "$NEW_HASH" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish snapshot to the snapshot-release branch
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          git config user.name "snapshot-bot"
+          git config user.email "actions@github.com"
+          # Orphan branch holding only the artifacts — consumers fetch it by
+          # ref, the source tree stays clean. dist/ is gitignored on main;
+          # the release branch ignores nothing by design.
+          git checkout --orphan snapshot-release
+          git rm -rf --cached . >/dev/null
+          rm -rf .github src test node_modules pnpm-lock.yaml tsconfig.json package.json .gitignore
+          git add -f dist
+          git commit -m "snapshot: $(node -e "console.log(JSON.parse(require('fs').readFileSync('dist/meta.json','utf8')).version)")"
+          git push origin snapshot-release --force
+
+      - name: Publish npm package (optional)
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          NPM_PUBLISH_TOKEN: ${{ secrets.NPM_PUBLISH_TOKEN }}
+        run: |
+          if [ -z "${NPM_PUBLISH_TOKEN:-}" ]; then
+            echo "NPM_PUBLISH_TOKEN not set — skipping npm publish (snapshot-release branch is published)."
+            exit 0
+          fi
+          set -euo pipefail
+          VERSION=$(node -e "console.log(JSON.parse(require('fs').readFileSync('dist/meta.json','utf8')).version.replace('v1-','').replace(/[^0-9a-zA-Z.-]/g,'-'))")
+          DATE=$(date -u +%Y.%m.%d)
+          PKG_VERSION="${DATE}-${VERSION}"
+          cat > package.npm.json <<EOF
+          {
+            "name": "tf2-schema-snapshot",
+            "version": "${PKG_VERSION}",
+            "description": "Daily-build TF2 schema snapshot (items, icons, i18n, qualities) merged from items_game.txt and GetSchemaItems.",
+            "type": "module",
+            "license": "MIT",
+            "files": ["dist"],
+            "publishConfig": { "access": "public" }
+          }
+          EOF
+          mkdir -p npm-pkg/dist
+          cp -r dist/* npm-pkg/dist/
+          cp package.npm.json npm-pkg/package.json
+          cd npm-pkg
+          npm config set //registry.npmjs.org/:_authToken "$NPM_PUBLISH_TOKEN"
+          npm publish --access public
