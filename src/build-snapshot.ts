@@ -59,21 +59,52 @@ export type QualityNameEntry = { quality: number; name: string };
 
 export const SNAPSHOT_FORMAT_VERSION = 1;
 
-function stableContentHash(items: SnapshotItem[]): string {
-  const hash = createHash("sha256");
-  const sorted = [...items].sort((a, b) => a.defindex - b.defindex);
-  for (const item of sorted) {
-    const canonical = {
-      defindex: item.defindex,
-      name: item.name,
-      marketHashName: item.marketHashName ?? null,
-      itemQuality: item.itemQuality ?? null,
-      iconUrl: item.iconUrl ?? null,
-      craftClass: item.craftClass ?? null,
-    };
-    hash.update(JSON.stringify(canonical));
-    hash.update("\n");
+/**
+ * Serialize JSON data deterministically: object key order is irrelevant, while
+ * array order is preserved. This makes the hash independent of insertion order
+ * without hiding changes to any published item field.
+ */
+function stableJson(value: unknown): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => stableJson(entry)).join(",")}]`;
   }
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const entries = Object.keys(record)
+      .filter((key) => record[key] !== undefined)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`);
+    return `{${entries.join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+function stableContentHash(content: {
+  appid: number;
+  contextid: string;
+  itemCount: number;
+  itemsGameUrl: string | null;
+  steamSchemaVersion: string | null;
+  languages: string[];
+  items: SnapshotItem[];
+  i18n: Record<string, I18nItemEntry[]>;
+  qualities: Record<string, QualityNameEntry[]>;
+}): string {
+  const hash = createHash("sha256");
+  // Hash every published data artifact and every non-volatile meta.json field.
+  // builtAt is deliberately excluded so an unchanged daily build stays unchanged.
+  hash.update(stableJson({
+    appid: content.appid,
+    contextid: content.contextid,
+    itemCount: content.itemCount,
+    itemsGameUrl: content.itemsGameUrl,
+    steamSchemaVersion: content.steamSchemaVersion,
+    languages: content.languages,
+    items: content.items,
+    i18n: content.i18n,
+    qualities: content.qualities,
+  }));
   return hash.digest("hex").slice(0, 32);
 }
 
@@ -170,29 +201,52 @@ export function buildSnapshot(input: BuildSnapshotInput): Snapshot {
   const items = mergeSchemaLayersAll(
     input.structuralItems,
     input.displayItems,
+  ).sort((a, b) => a.defindex - b.defindex);
+  const i18n = Object.fromEntries(
+    Object.entries(input.i18n).map(([language, entries]) => [
+      language,
+      [...entries].sort((a, b) => a.defindex - b.defindex),
+    ]),
   );
-  const contentHash = stableContentHash(items);
-  const version =
-    schemaSourceVersion(input.displayRaw) ?? `sha-${contentHash}`;
-  const languages = Object.keys(input.i18n).sort();
-  const qualityLanguages = Object.keys(input.qualities).sort();
+  const qualities = Object.fromEntries(
+    Object.entries(input.qualities).map(([language, entries]) => [
+      language,
+      [...entries].sort((a, b) => a.quality - b.quality),
+    ]),
+  );
+  const languages = Object.keys(i18n).sort();
+  const appid = input.appid ?? 440;
+  const contextid = input.contextid ?? "2";
+  const itemsGameUrl = input.itemsGameUrl;
+  const steamSchemaVersion = schemaSourceVersion(input.displayRaw) ?? null;
+  const contentHash = stableContentHash({
+    appid,
+    contextid,
+    itemCount: items.length,
+    itemsGameUrl,
+    steamSchemaVersion,
+    languages,
+    items,
+    i18n,
+    qualities,
+  });
+  const version = steamSchemaVersion ?? `sha-${contentHash}`;
 
   return {
     meta: {
       version: `v${SNAPSHOT_FORMAT_VERSION}-${version}`,
       builtAt: new Date().toISOString(),
-      appid: input.appid ?? 440,
-      contextid: input.contextid ?? "2",
+      appid,
+      contextid,
       contentHash,
       itemCount: items.length,
-      itemsGameUrl: input.itemsGameUrl,
-      steamSchemaVersion: schemaSourceVersion(input.displayRaw) ?? null,
+      itemsGameUrl,
+      steamSchemaVersion,
       languages,
     },
     items,
-    i18n: input.i18n,
-    qualities: input.qualities,
-    ...(qualityLanguages ? {} : {}),
+    i18n,
+    qualities,
   };
 }
 
