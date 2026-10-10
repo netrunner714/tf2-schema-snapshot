@@ -5,6 +5,12 @@ on:
     # 04:10 UTC — off-peak for Steam and for GitHub Actions load.
     - cron: "10 4 * * *"
   workflow_dispatch:
+    inputs:
+      publish_npm:
+        description: "Publish or retry npm even if schema content has not changed"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -196,7 +202,7 @@ jobs:
           git push origin snapshot-release --force
 
       - name: Publish npm package (optional)
-        if: steps.diff.outputs.changed == 'true'
+        if: steps.diff.outputs.changed == 'true' || inputs.publish_npm == true
         env:
           NPM_PUBLISH_TOKEN: ${{ secrets.NPM_PUBLISH_TOKEN }}
         run: |
@@ -224,4 +230,8 @@ jobs:
           cp package.npm.json npm-pkg/package.json
           cd npm-pkg
           npm config set //registry.npmjs.org/:_authToken "$NPM_PUBLISH_TOKEN"
+          if npm view "tf2-schema-snapshot@${PKG_VERSION}" version >/dev/null 2>&1; then
+            echo "tf2-schema-snapshot@${PKG_VERSION} is already published — skipping duplicate."
+            exit 0
+          fi
           npm publish --access public --tag latest
