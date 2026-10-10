@@ -19,6 +19,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - uses: pnpm/action-setup@v6
         with:
@@ -34,6 +36,9 @@ jobs:
       - name: Run tests
         run: pnpm test
 
+      - name: Typecheck
+        run: pnpm typecheck
+
       - name: Build snapshot
         env:
           STEAM_API_KEY: ${{ secrets.STEAM_API_KEY }}
@@ -41,13 +46,18 @@ jobs:
           SNAPSHOT_OUT_DIR: dist
         run: pnpm build:snapshot
 
-      - name: Detect changes against the latest release
+      - name: Load previous release and detect changes
         id: diff
         run: |
           set -euo pipefail
-          # Download the previous released snapshot and compare content hashes.
-          PREV_META_URL="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/snapshot-release/dist/meta.json"
-          PREV_HASH=$(curl -fsSL "$PREV_META_URL" 2>/dev/null | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{try{console.log(JSON.parse(d).contentHash)}catch{console.log('')}})" || echo "")
+          mkdir -p previous-snapshot
+          if git fetch origin snapshot-release; then
+            git archive FETCH_HEAD dist | tar -x -C previous-snapshot
+          else
+            echo "No previous snapshot-release branch; this is the first publication."
+          fi
+
+          PREV_HASH=$(node -e "try{console.log(JSON.parse(require('fs').readFileSync('previous-snapshot/dist/meta.json','utf8')).contentHash)}catch{console.log('')}")
           NEW_HASH=$(node -e "console.log(JSON.parse(require('fs').readFileSync('dist/meta.json','utf8')).contentHash)")
           echo "prev-hash: ${PREV_HASH:-none}"
           echo "new-hash: $NEW_HASH"
@@ -56,6 +66,10 @@ jobs:
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Generate human-readable and machine-readable changelog
+        if: steps.diff.outputs.changed == 'true'
+        run: pnpm exec tsx src/generate-changelog.ts previous-snapshot/dist dist "$GITHUB_SHA"
 
       - name: Publish snapshot to the snapshot-release branch
         if: steps.diff.outputs.changed == 'true'
@@ -68,7 +82,7 @@ jobs:
           # the release branch ignores nothing by design.
           git checkout --orphan snapshot-release
           git rm -rf --cached . >/dev/null
-          rm -rf .github src test node_modules pnpm-lock.yaml tsconfig.json package.json .gitignore
+          rm -rf .github src test node_modules pnpm-lock.yaml tsconfig.json package.json .gitignore changes
           git add -f dist
           git commit -m "snapshot: $(node -e "console.log(JSON.parse(require('fs').readFileSync('dist/meta.json','utf8')).version)")"
           git push origin snapshot-release --force
