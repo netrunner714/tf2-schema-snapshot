@@ -5,6 +5,12 @@ on:
     # 04:10 UTC — off-peak for Steam and for GitHub Actions load.
     - cron: "10 4 * * *"
   workflow_dispatch:
+    inputs:
+      publish_npm:
+        description: "Publish or retry npm even if schema content has not changed"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -110,10 +116,54 @@ jobs:
               lines.push("", `Full diff: ${report.changes.length - 30} more changes are available in changelog.json.`);
             }
           }
+          const categoryRu = {
+            "item-added": "Предмет добавлен",
+            "item-removed": "Предмет удалён",
+            "field-added": "Поле добавлено",
+            "field-removed": "Поле удалено",
+            "field-changed": "Поле изменено",
+            "localization-added": "Перевод добавлен",
+            "localization-removed": "Перевод удалён",
+            "localization-changed": "Перевод изменён",
+            "quality-added": "Название качества добавлено",
+            "quality-removed": "Название качества удалено",
+            "quality-changed": "Название качества изменено",
+            "meta-changed": "Метаданные снапшота изменены",
+          };
           lines.push(
             "",
-            "[Full changelog](https://github.com/netrunner714/tf2-schema-snapshot/blob/snapshot-release/dist/CHANGELOG.md) · [Machine-readable diff](https://github.com/netrunner714/tf2-schema-snapshot/blob/snapshot-release/dist/changelog.json)",
-            `Source commit: ${report.sourceCommit}`,
+            "## Изменения на русском",
+            "",
+            `Опубликован новый снимок схемы Team Fortress 2 от ${report.generatedAt.slice(0, 10)} (UTC).`,
+            "",
+            "### Сводка",
+            `- Предметы: +${s.addedItems} добавлено, -${s.removedItems} удалено, ${s.updatedItems} изменено`,
+            `- Поля: +${s.addedFields} добавлено, -${s.removedFields} удалено, ${s.changedFields} изменено`,
+            `- Изменения переводов: ${s.localizationChanges}`,
+            `- Изменения названий качеств: ${s.qualityChanges}`,
+            `- Изменения метаданных: ${s.metaChanges}`,
+            "",
+            "### Дополнительные заметки",
+            ...(report.manualNotes.length ? report.manualNotes.flatMap(note => [note, ""]) : ["Для этого выпуска дополнительных заметок нет.", ""]),
+            "### Автоматические изменения схемы",
+          );
+          if (!report.changes.length) lines.push("Изменений отдельных полей не обнаружено.");
+          else {
+            for (const change of report.changes.slice(0, 30)) {
+              let line = `- **${categoryRu[change.category] ?? change.category}** — \`${change.path}\``;
+              if (Object.hasOwn(change, "oldValue") || Object.hasOwn(change, "newValue")) {
+                line += `: ${display(change.oldValue)} → ${display(change.newValue)}`;
+              }
+              lines.push(line);
+            }
+            if (report.changes.length > 30) {
+              lines.push("", `Полный список: ещё ${report.changes.length - 30} изменений доступно в changelog.json.`);
+            }
+          }
+          lines.push(
+            "",
+            "[Полная история изменений / Full changelog](https://github.com/netrunner714/tf2-schema-snapshot/blob/snapshot-release/dist/CHANGELOG.md) · [Машиночитаемый diff](https://github.com/netrunner714/tf2-schema-snapshot/blob/snapshot-release/dist/changelog.json)",
+            `Исходный коммит: ${report.sourceCommit}`,
             ""
           );
           fs.writeFileSync(process.env.RUNNER_TEMP + "/release-notes.md", lines.join("\n"));
@@ -152,7 +202,7 @@ jobs:
           git push origin snapshot-release --force
 
       - name: Publish npm package (optional)
-        if: steps.diff.outputs.changed == 'true'
+        if: steps.diff.outputs.changed == 'true' || inputs.publish_npm == true
         env:
           NPM_PUBLISH_TOKEN: ${{ secrets.NPM_PUBLISH_TOKEN }}
         run: |
@@ -161,9 +211,25 @@ jobs:
             exit 0
           fi
           set -euo pipefail
-          VERSION=$(node -e "console.log(JSON.parse(require('fs').readFileSync('dist/meta.json','utf8')).version.replace('v1-','').replace(/[^0-9a-zA-Z.-]/g,'-'))")
-          DATE=$(date -u +%Y.%m.%d)
-          PKG_VERSION="${DATE}-${VERSION}"
+          # Publish stable semver versions, incrementing the patch number for each data release.
+          # Ignore old date/hash prerelease versions; start at 1.0.0 if no stable version exists.
+          VERSIONS_JSON=$(npm view tf2-schema-snapshot versions --json 2>/dev/null || printf '[]')
+          PKG_VERSION=$(node -e '
+            let versions;
+            try { versions = JSON.parse(process.argv[1]); } catch { versions = []; }
+            if (!Array.isArray(versions)) versions = [versions];
+            const stable = versions
+              .filter(v => typeof v === "string" && /^\d+\.\d+\.\d+$/.test(v))
+              .map(v => v.split(".").map(Number))
+              .sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]);
+            if (!stable.length) {
+              console.log("1.0.0");
+            } else {
+              const [major, minor, patch] = stable[stable.length - 1];
+              console.log(`${major}.${minor}.${patch + 1}`);
+            }
+          ' "$VERSIONS_JSON")
+          echo "Publishing stable npm version: $PKG_VERSION"
           cat > package.npm.json <<EOF
           {
             "name": "tf2-schema-snapshot",
@@ -180,4 +246,8 @@ jobs:
           cp package.npm.json npm-pkg/package.json
           cd npm-pkg
           npm config set //registry.npmjs.org/:_authToken "$NPM_PUBLISH_TOKEN"
-          npm publish --access public
+          if npm view "tf2-schema-snapshot@${PKG_VERSION}" version >/dev/null 2>&1; then
+            echo "tf2-schema-snapshot@${PKG_VERSION} is already published — skipping duplicate."
+            exit 0
+          fi
+          npm publish --access public --tag latest
