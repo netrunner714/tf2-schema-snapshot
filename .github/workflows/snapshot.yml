@@ -91,7 +91,7 @@ jobs:
             );
             console.log(match?.tagName || "");
           ' "$RELEASES" "$HASH")
-          if [[ "$MATCH_TAG" =~ ^v([0-9]+\\.[0-9]+\\.[0-9]+)$ ]]; then
+          if [[ "$MATCH_TAG" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
             VERSION="${BASH_REMATCH[1]}"
             TAG="$MATCH_TAG"
           else
@@ -101,7 +101,7 @@ jobs:
               const releases = JSON.parse(process.argv[2]);
               const all = (Array.isArray(npmVersions) ? npmVersions : [npmVersions])
                 .concat(releases.map(r => (r.tagName || "").replace(/^v/, "")))
-                .filter(v => typeof v === "string" && /^\\d+\\.\\d+\\.\\d+$/.test(v))
+                .filter(v => typeof v === "string" && /^\d+\.\d+\.\d+$/.test(v))
                 .map(v => v.split(".").map(Number))
                 .sort((a,b) => a[0]-b[0] || a[1]-b[1] || a[2]-b[2]);
               if (!all.length) console.log("1.0.0");
@@ -123,6 +123,8 @@ jobs:
 
       - name: Prepare GitHub Release notes
         if: steps.diff.outputs.changed == 'true' || inputs.publish_npm == true
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
         run: |
           node <<'NODE'
           const fs = require("node:fs");
@@ -131,8 +133,8 @@ jobs:
           const lines = [
             `## TF2 Schema Snapshot ${report.version}`,
             `Published: ${report.generatedAt.slice(0, 10)} UTC`,
-            `Release version: ${{ steps.release.outputs.version }}`,
-            `Content hash: `${report.currentContentHash}``,
+            "Release version: " + process.env.RELEASE_VERSION,
+            "Content hash: " + report.contentHash,
             "",
             "### Summary",
             `- Items: +${s.addedItems} added, -${s.removedItems} removed, ${s.updatedItems} updated`,
@@ -279,9 +281,9 @@ jobs:
           cp package.npm.json npm-pkg/package.json
           cd npm-pkg
           npm config set //registry.npmjs.org/:_authToken "$NPM_PUBLISH_TOKEN"
-          if npm view "tf2-schema-snapshot@\${VERSION}" version >/dev/null 2>&1; then
+          if npm view "tf2-schema-snapshot@${VERSION}" version >/dev/null 2>&1; then
             mkdir -p "$RUNNER_TEMP/npm-verify"
-            (cd "$RUNNER_TEMP/npm-verify" && npm pack "tf2-schema-snapshot@\${VERSION}" --silent)
+            (cd "$RUNNER_TEMP/npm-verify" && npm pack "tf2-schema-snapshot@${VERSION}" --silent)
             ARCHIVE=$(find "$RUNNER_TEMP/npm-verify" -name '*.tgz' -print -quit)
             PUBLISHED_HASH=$(tar -xOzf "$ARCHIVE" package/dist/meta.json | node -e '
               let s = "";
@@ -289,10 +291,10 @@ jobs:
               process.stdin.on("end", () => console.log(JSON.parse(s).contentHash || ""));
             ')
             if [ "$PUBLISHED_HASH" = "$HASH" ]; then
-              echo "tf2-schema-snapshot@\${VERSION} already contains this exact snapshot; retry is complete."
+              echo "tf2-schema-snapshot@${VERSION} already contains this exact snapshot; retry is complete."
               exit 0
             fi
-            echo "ERROR: tf2-schema-snapshot@\${VERSION} exists but has a different content hash." >&2
+            echo "ERROR: tf2-schema-snapshot@${VERSION} exists but has a different content hash." >&2
             exit 1
           fi
           npm publish --access public --tag latest
