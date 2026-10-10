@@ -231,7 +231,8 @@ jobs:
           VERSION="${{ steps.release.outputs.version }}"
           TITLE="TF2 Schema Snapshot — $VERSION"
           if gh release view "$TAG" >/dev/null 2>&1; then
-            if [ "${{ steps.diff.outputs.changed }}" = "true" ]; then
+            if [ "${{ steps.diff.outputs.changed }}" = "true" ] || [ "${{ inputs.publish_npm }}" = "true" ]; then
+              # A manual npm retry also synchronizes the visible release title and notes.
               gh release edit "$TAG" --title "$TITLE" --notes-file "$RUNNER_TEMP/release-notes.md" --latest
             else
               echo "Release $TAG already exists for this content; keeping it unchanged."
