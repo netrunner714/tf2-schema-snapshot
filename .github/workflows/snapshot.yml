@@ -81,16 +81,20 @@ jobs:
           set -euo pipefail
           HASH=$(node -e "console.log(JSON.parse(require('fs').readFileSync('dist/meta.json','utf8')).contentHash)")
           echo "content-hash=$HASH" >> "$GITHUB_OUTPUT"
-          RELEASES=$(gh release list --limit 100 --json tagName,body)
-          MATCH_TAG=$(node -e '
-            const releases = JSON.parse(process.argv[1]);
-            const hash = process.argv[2];
-            const match = releases.find(r =>
-              (r.body || "").includes(hash) ||
-              new RegExp("^schema-\\d{8}-" + hash.slice(0, 8) + "$").test(r.tagName)
-            );
-            console.log(match?.tagName || "");
-          ' "$RELEASES" "$HASH")
+          RELEASES=$(gh release list --limit 100 --json tagName,name)
+          MATCH_TAG=""
+          while IFS= read -r RELEASE_TAG; do
+            [ -n "$RELEASE_TAG" ] || continue
+            if [[ "$RELEASE_TAG" =~ ^schema-[0-9]{8}-${HASH:0:8}$ ]]; then
+              MATCH_TAG="$RELEASE_TAG"
+              break
+            fi
+            RELEASE_BODY=$(gh release view "$RELEASE_TAG" --json body --jq '.body' 2>/dev/null || true)
+            if [[ "$RELEASE_BODY" == *"$HASH"* ]]; then
+              MATCH_TAG="$RELEASE_TAG"
+              break
+            fi
+          done < <(node -e 'for (const r of JSON.parse(process.argv[1])) console.log(r.tagName)' "$RELEASES")
           if [[ "$MATCH_TAG" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
             VERSION="${BASH_REMATCH[1]}"
             TAG="$MATCH_TAG"
