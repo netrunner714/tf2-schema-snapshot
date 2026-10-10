@@ -110,10 +110,54 @@ jobs:
               lines.push("", `Full diff: ${report.changes.length - 30} more changes are available in changelog.json.`);
             }
           }
+          const categoryRu = {
+            "item-added": "Предмет добавлен",
+            "item-removed": "Предмет удалён",
+            "field-added": "Поле добавлено",
+            "field-removed": "Поле удалено",
+            "field-changed": "Поле изменено",
+            "localization-added": "Перевод добавлен",
+            "localization-removed": "Перевод удалён",
+            "localization-changed": "Перевод изменён",
+            "quality-added": "Название качества добавлено",
+            "quality-removed": "Название качества удалено",
+            "quality-changed": "Название качества изменено",
+            "meta-changed": "Метаданные снапшота изменены",
+          };
           lines.push(
             "",
-            "[Full changelog](https://github.com/netrunner714/tf2-schema-snapshot/blob/snapshot-release/dist/CHANGELOG.md) · [Machine-readable diff](https://github.com/netrunner714/tf2-schema-snapshot/blob/snapshot-release/dist/changelog.json)",
-            `Source commit: ${report.sourceCommit}`,
+            "## Изменения на русском",
+            "",
+            `Опубликован новый снимок схемы Team Fortress 2 от ${report.generatedAt.slice(0, 10)} (UTC).`,
+            "",
+            "### Сводка",
+            `- Предметы: +${s.addedItems} добавлено, -${s.removedItems} удалено, ${s.updatedItems} изменено`,
+            `- Поля: +${s.addedFields} добавлено, -${s.removedFields} удалено, ${s.changedFields} изменено`,
+            `- Изменения переводов: ${s.localizationChanges}`,
+            `- Изменения названий качеств: ${s.qualityChanges}`,
+            `- Изменения метаданных: ${s.metaChanges}`,
+            "",
+            "### Дополнительные заметки",
+            ...(report.manualNotes.length ? report.manualNotes.flatMap(note => [note, ""]) : ["Для этого выпуска дополнительных заметок нет.", ""]),
+            "### Автоматические изменения схемы",
+          );
+          if (!report.changes.length) lines.push("Изменений отдельных полей не обнаружено.");
+          else {
+            for (const change of report.changes.slice(0, 30)) {
+              let line = `- **${categoryRu[change.category] ?? change.category}** — \`${change.path}\``;
+              if (Object.hasOwn(change, "oldValue") || Object.hasOwn(change, "newValue")) {
+                line += `: ${display(change.oldValue)} → ${display(change.newValue)}`;
+              }
+              lines.push(line);
+            }
+            if (report.changes.length > 30) {
+              lines.push("", `Полный список: ещё ${report.changes.length - 30} изменений доступно в changelog.json.`);
+            }
+          }
+          lines.push(
+            "",
+            "[Полная история изменений / Full changelog](https://github.com/netrunner714/tf2-schema-snapshot/blob/snapshot-release/dist/CHANGELOG.md) · [Машиночитаемый diff](https://github.com/netrunner714/tf2-schema-snapshot/blob/snapshot-release/dist/changelog.json)",
+            `Исходный коммит: ${report.sourceCommit}`,
             ""
           );
           fs.writeFileSync(process.env.RUNNER_TEMP + "/release-notes.md", lines.join("\n"));
@@ -180,4 +224,4 @@ jobs:
           cp package.npm.json npm-pkg/package.json
           cd npm-pkg
           npm config set //registry.npmjs.org/:_authToken "$NPM_PUBLISH_TOKEN"
-          npm publish --access public
+          npm publish --access public --tag latest
