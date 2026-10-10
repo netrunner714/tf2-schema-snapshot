@@ -96,6 +96,27 @@ Environment variables:
   reconstruction, the seasonal key overrides, pagination/cursor edge
   cases and the merge + diff logic.
 
+## Changelog
+
+Each published snapshot includes:
+
+- `dist/CHANGELOG.md` — cumulative, human-readable release notes with a concise summary, manual notes, and a short automatic diff.
+- `dist/changelog.json` — the complete machine-readable diff, including paths and old/new values, plus the previous/current content hashes and source commit.
+
+The automatic report compares the newly built artifacts with the previous `snapshot-release` snapshot. It distinguishes added/removed items, item field changes, localization changes, quality-name changes, and metadata changes. Volatile build timestamps and content hashes are not reported as schema changes.
+
+### Adding manual release notes
+
+Add a new Markdown file under `changes/` for each consumer-visible code change, for example `changes/fix-icon-url.md`:
+
+```md
+Fixed icon URL normalization for items using the inventory image CDN.
+```
+
+Notes are included in the next published snapshot whose content changes. A note is picked up by its commit range and is not repeated in later releases. If a code change does not change published data, its note remains queued until a snapshot is published. Create a new file for each new note; do not edit or reuse a previously consumed note. See [changes/README.md](changes/README.md).
+
+A separate CI workflow runs tests and TypeScript typechecking for pull requests and pushes to `main`. The snapshot publisher remains scheduled daily at 04:10 UTC and can also be started manually.
+
 ## License
 
 MIT
@@ -204,6 +225,27 @@ STEAM_API_KEY=<ключ> pnpm build:snapshot
   иконок (включая случай 404 для `image_inventory` на CDN),
   восстановление рыночных имён, оверрайды сезонных ключей, граничные
   случаи пагинации и логику merge + diff.
+
+## Changelog
+
+Каждый опубликованный снапшот содержит:
+
+- `dist/CHANGELOG.md` — накопительную историю релизов для людей: краткая сводка, ручные заметки и короткий автоматический diff.
+- `dist/changelog.json` — полный diff для программ: пути полей, старые и новые значения, хэши предыдущего и текущего содержимого, исходный коммит.
+
+Автоматический отчёт сравнивает новую сборку с предыдущим снапшотом из `snapshot-release`. Он различает добавленные/удалённые предметы, изменения полей, локализаций, названий качеств и метаданных. Время сборки и хэш контента не считаются изменениями схемы.
+
+### Как добавить ручные заметки к релизу
+
+Для каждого изменения, важного потребителю, добавь новый Markdown-файл в `changes/`, например `changes/fix-icon-url.md`:
+
+```md
+Исправлена нормализация URL иконок для предметов, использующих CDN инвентаря.
+```
+
+Заметки попадут в следующий опубликованный снапшот, содержимое которого изменилось. Они выбираются по диапазону коммитов и не повторяются в следующих релизах. Если изменение кода не повлияло на опубликованные данные, заметка подождёт следующей публикации снапшота. Для каждой новой заметки создавай отдельный файл; не редактируй и не используй повторно уже опубликованные заметки. Подробности — в [changes/README.md](changes/README.md).
+
+Отдельный CI workflow запускает тесты и проверку TypeScript для pull request и push в `main`. Публикация снапшота по-прежнему запускается ежедневно в 04:10 UTC или вручную.
 
 ## Лицензия
 
