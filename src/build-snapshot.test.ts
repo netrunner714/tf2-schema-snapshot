@@ -142,3 +142,83 @@ test("diffSnapshots detects additions, updates and removals", () => {
   const same = diffSnapshots(previous, previous);
   assert.equal(same.identical, true);
 });
+
+test("content hash covers structural fields and localized artifacts", () => {
+  const base = {
+    itemsGameUrl: "https://example.test/items_game.txt",
+    structuralItems: [
+      structuralItem(10, {
+        name: "Item",
+        schemaData: { prefab: "tool", attributes: { damage: 5 } },
+      }),
+    ],
+    displayItems: [],
+    displayRaw: { result: { version: "schema-1", items: [] } },
+    i18n: { ru: [{ defindex: 10, name: "Предмет" }] },
+    qualities: { en: [{ quality: 6, name: "Unique" }] },
+  };
+  const original = buildSnapshot(base);
+
+  const changedStructure = buildSnapshot({
+    ...base,
+    structuralItems: [
+      structuralItem(10, {
+        name: "Item",
+        schemaData: { prefab: "tool", attributes: { damage: 6 } },
+      }),
+    ],
+  });
+  assert.notEqual(changedStructure.meta.contentHash, original.meta.contentHash);
+
+  const changedI18n = buildSnapshot({
+    ...base,
+    i18n: { ru: [{ defindex: 10, name: "Другое имя" }] },
+  });
+  assert.notEqual(changedI18n.meta.contentHash, original.meta.contentHash);
+
+  const changedQualities = buildSnapshot({
+    ...base,
+    qualities: { en: [{ quality: 6, name: "Different" }] },
+  });
+  assert.notEqual(changedQualities.meta.contentHash, original.meta.contentHash);
+});
+
+test("content hash and artifact ordering are independent of input object key order", () => {
+  const first = buildSnapshot({
+    itemsGameUrl: null,
+    structuralItems: [
+      structuralItem(2, { name: "B", schemaData: { z: 1, a: 2 } }),
+      structuralItem(1, { name: "A" }),
+    ],
+    displayItems: [],
+    displayRaw: {},
+    i18n: {
+      ru: [
+        { defindex: 2, name: "Б" },
+        { defindex: 1, name: "А" },
+      ],
+    },
+    qualities: { en: [{ quality: 6, name: "Unique" }, { quality: 0, name: "Normal" }] },
+  });
+  const second = buildSnapshot({
+    itemsGameUrl: null,
+    structuralItems: [
+      structuralItem(1, { name: "A" }),
+      structuralItem(2, { name: "B", schemaData: { a: 2, z: 1 } }),
+    ],
+    displayItems: [],
+    displayRaw: {},
+    i18n: {
+      ru: [
+        { defindex: 1, name: "А" },
+        { defindex: 2, name: "Б" },
+      ],
+    },
+    qualities: { en: [{ quality: 0, name: "Normal" }, { quality: 6, name: "Unique" }] },
+  });
+
+  assert.equal(first.meta.contentHash, second.meta.contentHash);
+  assert.deepEqual(first.items.map((item) => item.defindex), [1, 2]);
+  assert.deepEqual(first.i18n.ru?.map((item) => item.defindex), [1, 2]);
+  assert.deepEqual(first.qualities.en?.map((item) => item.quality), [0, 6]);
+});
