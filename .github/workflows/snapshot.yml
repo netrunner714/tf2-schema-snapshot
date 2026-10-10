@@ -71,6 +71,70 @@ jobs:
         if: steps.diff.outputs.changed == 'true'
         run: pnpm exec tsx src/generate-changelog.ts previous-snapshot/dist dist "$GITHUB_SHA"
 
+      - name: Prepare GitHub Release notes
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+          const report = JSON.parse(fs.readFileSync("dist/changelog.json", "utf8"));
+          const s = report.summary;
+          const lines = [
+            `## TF2 Schema Snapshot ${report.version}`,
+            `Published: ${report.generatedAt.slice(0, 10)} UTC`,
+            "",
+            "### Summary",
+            `- Items: +${s.addedItems} added, -${s.removedItems} removed, ${s.updatedItems} updated`,
+            `- Fields: +${s.addedFields} added, -${s.removedFields} removed, ${s.changedFields} changed`,
+            `- Localization changes: ${s.localizationChanges}`,
+            `- Quality-label changes: ${s.qualityChanges}`,
+            `- Metadata changes: ${s.metaChanges}`,
+            "",
+            "### Patch notes",
+            ...(report.manualNotes.length ? report.manualNotes.flatMap(note => [note, ""]) : ["No manual notes for this release.", ""]),
+            "### Automatic schema changes",
+          ];
+          const display = value => {
+            const text = typeof value === "string" ? value : JSON.stringify(value);
+            return text === undefined ? "undefined" : text.length > 100 ? text.slice(0, 97) + "…" : text;
+          };
+          if (!report.changes.length) lines.push("- No field-level differences were found.");
+          else {
+            for (const change of report.changes.slice(0, 30)) {
+              let line = `- **${change.category}** — \`${change.path}\``;
+              if (Object.hasOwn(change, "oldValue") || Object.hasOwn(change, "newValue")) {
+                line += `: ${display(change.oldValue)} → ${display(change.newValue)}`;
+              }
+              lines.push(line);
+            }
+            if (report.changes.length > 30) {
+              lines.push("", `Full diff: ${report.changes.length - 30} more changes are available in changelog.json.`);
+            }
+          }
+          lines.push(
+            "",
+            "[Full changelog](https://github.com/netrunner714/tf2-schema-snapshot/blob/snapshot-release/dist/CHANGELOG.md) · [Machine-readable diff](https://github.com/netrunner714/tf2-schema-snapshot/blob/snapshot-release/dist/changelog.json)",
+            `Source commit: ${report.sourceCommit}`,
+            ""
+          );
+          fs.writeFileSync(process.env.RUNNER_TEMP + "/release-notes.md", lines.join("\n"));
+          NODE
+
+      - name: Create or update GitHub Release
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          DATE=$(date -u +%Y%m%d)
+          HASH=$(node -e "console.log(JSON.parse(require('fs').readFileSync('dist/meta.json','utf8')).contentHash.slice(0,8))")
+          TAG="schema-${DATE}-${HASH}"
+          TITLE="TF2 Schema Snapshot — $(date -u +%Y-%m-%d)"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "$TITLE" --notes-file "$RUNNER_TEMP/release-notes.md" --latest
+          else
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "$TITLE" --notes-file "$RUNNER_TEMP/release-notes.md" --latest
+          fi
+
       - name: Publish snapshot to the snapshot-release branch
         if: steps.diff.outputs.changed == 'true'
         run: |
