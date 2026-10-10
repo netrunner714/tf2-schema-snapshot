@@ -219,7 +219,7 @@ jobs:
             try { versions = JSON.parse(process.argv[1]); } catch { versions = []; }
             if (!Array.isArray(versions)) versions = [versions];
             const stable = versions
-              .filter(v => typeof v === "string" && /^\\d+\\.\\d+\\.\\d+$/.test(v))
+              .filter(v => typeof v === "string" && /^\d+\.\d+\.\d+$/.test(v))
               .map(v => v.split(".").map(Number))
               .sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]);
             if (!stable.length) {
