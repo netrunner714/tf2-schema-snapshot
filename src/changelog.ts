@@ -24,6 +24,7 @@ export type ChangelogEntry = {
   category: ChangeCategory;
   path: string;
   defindex?: number;
+  quality?: number;
   language?: string;
   oldValue?: unknown;
   newValue?: unknown;
@@ -91,7 +92,7 @@ function compareObjectFields(
   before: unknown,
   after: unknown,
   path: string,
-  context: { defindex?: number; language?: string },
+  context: { defindex?: number; quality?: number; language?: string },
   categories: {
     added: ChangeCategory;
     removed: ChangeCategory;
@@ -155,7 +156,7 @@ function compareLocalizedEntries(
       const numericId = Number(id);
       const context = prefix === "i18n"
         ? { defindex: numericId, language }
-        : { language };
+        : { quality: numericId, language };
       const identityPath = prefix === "i18n"
         ? `i18n.${language}.items[${id}]`
         : `i18n.${language}.qualities[${id}]`;
@@ -202,7 +203,7 @@ function summarize(changes: ChangelogEntry[]): ChangelogSummary {
   const removedItems = changes.filter((c) => c.category === "item-removed").length;
   const updatedItems = new Set(
     changes.filter((c) => c.defindex !== undefined &&
-      !["item-added", "item-removed"].includes(c.category)).map((c) => c.defindex),
+      ["field-added", "field-removed", "field-changed"].includes(c.category)).map((c) => c.defindex),
   ).size;
   const addedFields = changes.filter((c) => c.category === "field-added").length;
   const removedFields = changes.filter((c) => c.category === "field-removed").length;
