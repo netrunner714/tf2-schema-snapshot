@@ -91,6 +91,7 @@ Environment variables:
 - **Content-hash change detection.** The workflow compares content
   hashes with the latest release and skips publishing when nothing
   changed.
+- **Synchronized numeric releases.** Each data release uses the same stable version in npm and a GitHub tag (`1.0.1` and `v1.0.1`). The content hash is recorded in the GitHub Release notes and checked when retrying an npm publish, so a failed publish can be retried without inventing another version.
 - **Unit tests** cover the KeyValues parser, icon URL normalization
   (including the `image_inventory` CDN 404 case), market name
   reconstruction, the seasonal key overrides, pagination/cursor edge
@@ -221,6 +222,7 @@ STEAM_API_KEY=<ключ> pnpm build:snapshot
   предмета имеют одинаковый defindex.
 - **Сравнение хэшей контента.** Workflow сравнивает хэш с последним
   релизом и пропускает публикацию, если ничего не изменилось.
+- **Синхронизация числовых версий.** Один выпуск данных использует одну стабильную версию в npm и GitHub tag (например, `1.0.1` и `v1.0.1`). Хэш содержимого записывается в описание GitHub Release и проверяется при повторной публикации npm, поэтому неудачную публикацию можно повторить без создания лишней версии.
 - **Модульные тесты** покрывают парсер KeyValues, нормализацию URL
   иконок (включая случай 404 для `image_inventory` на CDN),
   восстановление рыночных имён, оверрайды сезонных ключей, граничные
