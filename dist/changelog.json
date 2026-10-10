@@ -1,0 +1,29 @@
+{
+  "formatVersion": 1,
+  "generatedAt": "2026-10-10T09:44:10.111Z",
+  "sourceCommit": "0d3e6bf00345074e18879bf10c5c06979e219fff",
+  "previousContentHash": "f8d16313250b72c865ba0ebbf430e505",
+  "contentHash": "729524364e94723f6e6ba926ccfb2de4",
+  "version": "v1-sha-729524364e94723f6e6ba926ccfb2de4",
+  "summary": {
+    "addedItems": 0,
+    "removedItems": 0,
+    "updatedItems": 0,
+    "addedFields": 0,
+    "removedFields": 0,
+    "changedFields": 0,
+    "localizationChanges": 0,
+    "qualityChanges": 0,
+    "metaChanges": 1,
+    "totalChanges": 1
+  },
+  "manualNotes": [],
+  "changes": [
+    {
+      "category": "meta-changed",
+      "path": "meta.version",
+      "oldValue": "v1-sha-f8d16313250b72c865ba0ebbf430e505",
+      "newValue": "v1-sha-729524364e94723f6e6ba926ccfb2de4"
+    }
+  ]
+}
