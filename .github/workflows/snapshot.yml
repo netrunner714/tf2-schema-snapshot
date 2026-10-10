@@ -73,12 +73,56 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Resolve synchronized release version
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          HASH=$(node -e "console.log(JSON.parse(require('fs').readFileSync('dist/meta.json','utf8')).contentHash)")
+          echo "content-hash=$HASH" >> "$GITHUB_OUTPUT"
+          RELEASES=$(gh release list --limit 100 --json tagName,body)
+          MATCH_TAG=$(node -e '
+            const releases = JSON.parse(process.argv[1]);
+            const hash = process.argv[2];
+            const match = releases.find(r =>
+              (r.body || "").includes(hash) ||
+              new RegExp("^schema-\\d{8}-" + hash.slice(0, 8) + "$").test(r.tagName)
+            );
+            console.log(match?.tagName || "");
+          ' "$RELEASES" "$HASH")
+          if [[ "$MATCH_TAG" =~ ^v([0-9]+\\.[0-9]+\\.[0-9]+)$ ]]; then
+            VERSION="${BASH_REMATCH[1]}"
+            TAG="$MATCH_TAG"
+          else
+            NPM_VERSIONS=$(npm view tf2-schema-snapshot versions --json 2>/dev/null || printf '[]')
+            VERSION=$(node -e '
+              const npmVersions = JSON.parse(process.argv[1]);
+              const releases = JSON.parse(process.argv[2]);
+              const all = (Array.isArray(npmVersions) ? npmVersions : [npmVersions])
+                .concat(releases.map(r => (r.tagName || "").replace(/^v/, "")))
+                .filter(v => typeof v === "string" && /^\\d+\\.\\d+\\.\\d+$/.test(v))
+                .map(v => v.split(".").map(Number))
+                .sort((a,b) => a[0]-b[0] || a[1]-b[1] || a[2]-b[2]);
+              if (!all.length) console.log("1.0.0");
+              else {
+                const [major, minor, patch] = all[all.length - 1];
+                console.log(`${major}.${minor}.${patch + 1}`);
+              }
+            ' "$NPM_VERSIONS" "$RELEASES")
+            TAG="v$VERSION"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "matched-tag=$MATCH_TAG" >> "$GITHUB_OUTPUT"
+          echo "Synchronized release: $TAG (content hash $HASH)"
+
       - name: Generate human-readable and machine-readable changelog
-        if: steps.diff.outputs.changed == 'true'
+        if: steps.diff.outputs.changed == 'true' || inputs.publish_npm == true
         run: pnpm exec tsx src/generate-changelog.ts previous-snapshot/dist dist "$GITHUB_SHA"
 
       - name: Prepare GitHub Release notes
-        if: steps.diff.outputs.changed == 'true'
+        if: steps.diff.outputs.changed == 'true' || inputs.publish_npm == true
         run: |
           node <<'NODE'
           const fs = require("node:fs");
@@ -87,6 +131,8 @@ jobs:
           const lines = [
             `## TF2 Schema Snapshot ${report.version}`,
             `Published: ${report.generatedAt.slice(0, 10)} UTC`,
+            `Release version: ${{ steps.release.outputs.version }}`,
+            `Content hash: `${report.currentContentHash}``,
             "",
             "### Summary",
             `- Items: +${s.addedItems} added, -${s.removedItems} removed, ${s.updatedItems} updated`,
@@ -170,17 +216,20 @@ jobs:
           NODE
 
       - name: Create or update GitHub Release
-        if: steps.diff.outputs.changed == 'true'
+        if: steps.diff.outputs.changed == 'true' || inputs.publish_npm == true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          DATE=$(date -u +%Y%m%d)
-          HASH=$(node -e "console.log(JSON.parse(require('fs').readFileSync('dist/meta.json','utf8')).contentHash.slice(0,8))")
-          TAG="schema-${DATE}-${HASH}"
-          TITLE="TF2 Schema Snapshot — $(date -u +%Y-%m-%d)"
+          TAG="${{ steps.release.outputs.tag }}"
+          VERSION="${{ steps.release.outputs.version }}"
+          TITLE="TF2 Schema Snapshot — $VERSION"
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release edit "$TAG" --title "$TITLE" --notes-file "$RUNNER_TEMP/release-notes.md" --latest
+            if [ "${{ steps.diff.outputs.changed }}" = "true" ]; then
+              gh release edit "$TAG" --title "$TITLE" --notes-file "$RUNNER_TEMP/release-notes.md" --latest
+            else
+              echo "Release $TAG already exists for this content; keeping it unchanged."
+            fi
           else
             gh release create "$TAG" --target "$GITHUB_SHA" --title "$TITLE" --notes-file "$RUNNER_TEMP/release-notes.md" --latest
           fi
@@ -206,34 +255,18 @@ jobs:
         env:
           NPM_PUBLISH_TOKEN: ${{ secrets.NPM_PUBLISH_TOKEN }}
         run: |
+          set -euo pipefail
           if [ -z "${NPM_PUBLISH_TOKEN:-}" ]; then
-            echo "NPM_PUBLISH_TOKEN not set — skipping npm publish (snapshot-release branch is published)."
+            echo "NPM_PUBLISH_TOKEN not set — skipping npm publish."
             exit 0
           fi
-          set -euo pipefail
-          # Publish stable semver versions, incrementing the patch number for each data release.
-          # Ignore old date/hash prerelease versions; start at 1.0.0 if no stable version exists.
-          VERSIONS_JSON=$(npm view tf2-schema-snapshot versions --json 2>/dev/null || printf '[]')
-          PKG_VERSION=$(node -e '
-            let versions;
-            try { versions = JSON.parse(process.argv[1]); } catch { versions = []; }
-            if (!Array.isArray(versions)) versions = [versions];
-            const stable = versions
-              .filter(v => typeof v === "string" && /^\d+\.\d+\.\d+$/.test(v))
-              .map(v => v.split(".").map(Number))
-              .sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]);
-            if (!stable.length) {
-              console.log("1.0.0");
-            } else {
-              const [major, minor, patch] = stable[stable.length - 1];
-              console.log(`${major}.${minor}.${patch + 1}`);
-            }
-          ' "$VERSIONS_JSON")
-          echo "Publishing stable npm version: $PKG_VERSION"
+          VERSION="${{ steps.release.outputs.version }}"
+          HASH="${{ steps.release.outputs.content-hash }}"
+          echo "Publishing synchronized npm version: $VERSION"
           cat > package.npm.json <<EOF
           {
             "name": "tf2-schema-snapshot",
-            "version": "${PKG_VERSION}",
+            "version": "$VERSION",
             "description": "Daily-build TF2 schema snapshot (items, icons, i18n, qualities) merged from items_game.txt and GetSchemaItems.",
             "type": "module",
             "license": "MIT",
@@ -246,8 +279,20 @@ jobs:
           cp package.npm.json npm-pkg/package.json
           cd npm-pkg
           npm config set //registry.npmjs.org/:_authToken "$NPM_PUBLISH_TOKEN"
-          if npm view "tf2-schema-snapshot@${PKG_VERSION}" version >/dev/null 2>&1; then
-            echo "tf2-schema-snapshot@${PKG_VERSION} is already published — skipping duplicate."
-            exit 0
+          if npm view "tf2-schema-snapshot@\${VERSION}" version >/dev/null 2>&1; then
+            mkdir -p "$RUNNER_TEMP/npm-verify"
+            (cd "$RUNNER_TEMP/npm-verify" && npm pack "tf2-schema-snapshot@\${VERSION}" --silent)
+            ARCHIVE=$(find "$RUNNER_TEMP/npm-verify" -name '*.tgz' -print -quit)
+            PUBLISHED_HASH=$(tar -xOzf "$ARCHIVE" package/dist/meta.json | node -e '
+              let s = "";
+              process.stdin.on("data", d => s += d);
+              process.stdin.on("end", () => console.log(JSON.parse(s).contentHash || ""));
+            ')
+            if [ "$PUBLISHED_HASH" = "$HASH" ]; then
+              echo "tf2-schema-snapshot@\${VERSION} already contains this exact snapshot; retry is complete."
+              exit 0
+            fi
+            echo "ERROR: tf2-schema-snapshot@\${VERSION} exists but has a different content hash." >&2
+            exit 1
           fi
           npm publish --access public --tag latest
